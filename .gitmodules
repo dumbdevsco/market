@@ -1,0 +1,9 @@
+[submodule "market-spb"]
+	path = market-spb
+	url = git@github.com:dumbdevsco/market-spb.git
+[submodule "market-msk"]
+	path = market-msk
+	url = git@github.com:dumbdevsco/market-msk.git
+[submodule "market-data"]
+	path = market-data
+	url = git@github.com:dumbdevsco/market-data.git
