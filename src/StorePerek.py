@@ -7,12 +7,6 @@ import datetime
 import csv
 import os
 
-
-URL_ROOT = 'https://www.perekrestok.ru'
-
-
-CARD_KEYS = ['name', 'price', 'size', 'url', 'time', 'name_', 'price_', 'brand', 'calories', 'proteins', 'fats', 'carbos', 'composition', 'get_ok', 'parse_ok', 'time_']
-
 class Scrapper:
     headers = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0',
@@ -37,7 +31,7 @@ class Scrapper:
     write = True
     append = True
     
-    dname = '../tsv/perekr'
+    dname = '../market-data/perekrestok'
     fext = '.tsv'
     delim = '\t'
     placeholder = 'none'
@@ -87,10 +81,17 @@ class Scrapper:
         os.rename(fname_tmp, fname)
 
     def request_scards(self, cat):
-        cards = []
         try:
-            req = requests.get(URL_ROOT + CAT_URLS[cat], headers=self.headers)
-            bs = BeautifulSoup(req.text, 'html.parser')
+            req = requests.get(get_url(cat), headers=self.headers)
+        except Exception:
+            pass
+        return self.parse_scards(req.text)
+
+    def parse_scards(self, text):
+        cards = []
+        wraps = []
+        try:
+            bs = BeautifulSoup(text, 'html.parser')
             wraps = bs.find_all(class_='product-card-wrapper')
         except Exception:
             pass
@@ -212,6 +213,124 @@ class Scrapper:
             card[key] = self.placeholder
         return card
 
+def get_url(cat):
+    return URL_ROOT + CAT_URLS[cat] 
+
+def get_product_alias(url):
+    name = url.split('/')[-1]
+    name = name.split('-')
+    name = name[0]+'-'+name[-1]
+    return name
+
+def run_fullcards():
+    s = Scrapper()
+    s.max_cards = 999
+    for cat in CAT_URLS:
+        print(cat)
+        s.run_fullcards(cat)
+
+def run_localprice():
+    for loc in DELIV_LOCS:
+        bro = get_local_browser(DELIV_LOCS[loc])
+        scr = Scrapper()
+        for cat in CAT_URLS:
+            print(loc, cat)
+            bro.get(get_url(cat))
+            scards = scr.parse_scards(bro.page_source)
+            for scard in scards:
+                dname = os.path.join(DATA_DIR, cat)
+                if not os.path.isdir(dname):
+                    os.makedirs(dname, mode=0o777)
+                alias = get_product_alias(scard['url'])
+                fname = os.path.join(dname, alias + '.tsv')
+                if not os.path.isfile(fname):
+                    file = open(fname, 'w')
+                    wr = csv.DictWriter(file, fieldnames=['time'] + DELIV_KEYS, delimiter=DELIM_CHAR)
+                    wr.writeheader()
+                    row = dict.fromkeys(['time'] + DELIV_KEYS)
+                    row['time'] = datetime.datetime.now().ctime()
+                    for k in DELIV_KEYS:
+                        row[k] = 'none'
+                    row[loc] = scard['price']
+                    wr.writerow(row)
+                    file.close()
+                else:
+                    file = open(fname, 'a')
+                    wr = csv.DictWriter(file, fieldnames=DELIV_KEYS, delimiter=DELIM_CHAR)
+                    re = csv.DictReader(file, fieldnames=DELIV_KEYS, delimiter=DELIM_CHAR)
+                    return re
+
+            return scards
+
+def get_local_browser(loc):
+    from selenium import webdriver
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+    from selenium.webdriver.common.keys import Keys 
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.actions.action_builder import ActionBuilder 
+    from selenium.webdriver.common.action_chains import ActionChains
+
+    # Options
+    options = webdriver.FirefoxOptions()
+    #options.add_argument("-headless")
+
+    # Profile
+    firefox_profile = FirefoxProfile()
+    #firefox_profile.set_preference("javascript.enabled", False)
+    options.profile = firefox_profile
+
+    # Driver
+    browser = webdriver.Firefox()
+    browser.get(URL_ROOT)
+
+    # 
+    e = browser.find_element(By.CLASS_NAME, 'delivery-notify-btn')
+    e.click()
+
+    e = browser.find_element(By.ID, 'react-select-2-input')
+    e.clear()
+    e.send_keys(loc)
+
+    ActionChains(browser)\
+        .pause(2)\
+        .move_to_element(e)\
+        .click()\
+        .move_to_element_with_offset(e, 0, 50)\
+        .click()\
+        .move_to_element_with_offset(e, 0, -50)\
+        .click()\
+        .perform()
+    
+    e = browser.find_element(By.CLASS_NAME, 'delivery-status__submit')
+    e.click()
+
+    # доставки нет в ночное время
+    try:
+        e = browser.find_element(By.CLASS_NAME, 'delivery-button__address')
+        print(e.text)
+    except:
+        pass
+
+    return browser
+
+
+
+
+DELIM_CHAR = '\t'
+
+DATA_DIR = '../market-data/perekrestok'
+
+URL_ROOT = 'https://www.perekrestok.ru'
+
+CARD_KEYS = ['name', 'price', 'size', 'url', 'time', 'name_', 'price_', 'brand', 'calories', 'proteins', 'fats', 'carbos', 'composition', 'get_ok', 'parse_ok', 'time_']
+
+DELIV_KEYS = ['msk', 'spb', 'ekb', 'nn', 'nsk', 'pg', 'rnd']
+
+DELIV_LOCS = {
+    'msk': 'Москва, Большой Патриарший переулок, 5',
+    'spb': 'Санкт-Петербург, Биржевая площадь, 4',
+}
 
 CAT_URLS = {
     'moloko': '/cat/c/114/moloko',
