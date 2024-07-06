@@ -18,6 +18,9 @@ def tsv_update_fullcards_all():
         tsv_update_fullcards(cat)
 
 def tsv_update_shortcards(cat):
+    tsv_add_cards(cat, request_shortcards(cat))
+
+def tsv_add_cards(cat, cards):
     fname = get_file(cat)
     if os.path.isfile(fname):
         file = open(fname, 'r')
@@ -34,7 +37,6 @@ def tsv_update_shortcards(cat):
     for card in re:
         wr.writerow(card)
 
-    cards = request_shortcards(cat)
     urls_rm = tsv_read_urls(cat)
     cards = remove_cards_by_url(cards, urls_rm)
 
@@ -152,10 +154,6 @@ def tsv_find_duplicates(cat):
         return []
     file = open(fname, 'r')
     re = csv.DictReader(file, delimiter=DELIM_CHAR)
-
-    fname_tmp = get_tmp_file(cat)
-    file_tmp = open(fname_tmp, 'w')
-    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
 
     cards = list(re)
     urls = [item['url'] for item in cards]
@@ -282,58 +280,6 @@ def get_empty_card():
         card[key] = PLACEHOLDER
     return card
 
-def get_local_browser(loc):
-    from selenium import webdriver
-    from selenium.webdriver.firefox.options import Options
-    from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
-    from selenium.webdriver.common.keys import Keys 
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.common.actions.action_builder import ActionBuilder 
-    from selenium.webdriver.common.action_chains import ActionChains
-
-    # Options
-    options = webdriver.FirefoxOptions()
-    #options.add_argument("-headless")
-
-    # Profile
-    firefox_profile = FirefoxProfile()
-    #firefox_profile.set_preference("javascript.enabled", False)
-    options.profile = firefox_profile
-
-    # Driver
-    browser = webdriver.Firefox()
-    browser.get(URL_ROOT)
-
-    # 
-    e = browser.find_element(By.CLASS_NAME, 'delivery-notify-btn')
-    e.click()
-
-    e = browser.find_element(By.ID, 'react-select-2-input')
-    e.clear()
-    e.send_keys(loc)
-
-    ActionChains(browser)\
-        .pause(2)\
-        .move_to_element(e)\
-        .click()\
-        .move_to_element_with_offset(e, 0, 50)\
-        .click()\
-        .move_to_element_with_offset(e, 0, -50)\
-        .click()\
-        .perform()
-    
-    e = browser.find_element(By.CLASS_NAME, 'delivery-status__submit')
-    e.click()
-
-    # доставки нет в ночное время
-    try:
-        e = browser.find_element(By.CLASS_NAME, 'delivery-button__address')
-        print(e.text)
-    except:
-        pass
-
-    return browser
-
 def get_cat_url(cat):
     return URL_ROOT + CAT_URLS[cat] 
 
@@ -377,6 +323,71 @@ def get_empty_card():
     for key in CARD_KEYS:
         card[key] = PLACEHOLDER
     return card
+
+def get_browser_local(loc):
+    from selenium import webdriver
+    from selenium.webdriver.firefox.options import Options
+    from selenium.webdriver.firefox.firefox_profile import FirefoxProfile
+    from selenium.webdriver.common.keys import Keys 
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.actions.action_builder import ActionBuilder 
+    from selenium.webdriver.common.action_chains import ActionChains
+
+    # Options
+    options = webdriver.FirefoxOptions()
+    #options.add_argument("-headless")
+
+    # Profile
+    firefox_profile = FirefoxProfile()
+    #firefox_profile.set_preference("javascript.enabled", False)
+    options.profile = firefox_profile
+
+    # Driver
+    browser = webdriver.Firefox()
+    browser.get(URL_ROOT)
+
+    # 
+    e = browser.find_element(By.CLASS_NAME, 'delivery-notify-btn')
+    e.click()
+
+    e = browser.find_element(By.ID, 'react-select-2-input')
+    e.clear()
+    if loc in DELIV_LOCS:
+        e.send_keys(DELIV_LOCS[loc])
+    else:
+        e.send_keys(loc)
+
+    ActionChains(browser)\
+        .pause(2)\
+        .move_to_element(e)\
+        .click()\
+        .move_to_element_with_offset(e, 0, 50)\
+        .click()\
+        .move_to_element_with_offset(e, 0, -50)\
+        .click()\
+        .perform()
+    
+    e = browser.find_element(By.CLASS_NAME, 'delivery-status__submit')
+    e.click()
+
+    # доставки нет в ночное время
+    try:
+        e = browser.find_element(By.CLASS_NAME, 'delivery-button__address')
+        print(e.text)
+    except:
+        pass
+
+    return browser
+
+def request_shortcards_local(cat, loc):
+    bro = get_browser_local(loc)
+    cards = []
+    try:
+        rsp = requests.get(get_cat_url(cat), headers=REQ_HEADERS)
+        cards = parse_shortcards(rsp.text)
+    except Exception:
+        pass
+    return cards
 
 REQ_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0',
