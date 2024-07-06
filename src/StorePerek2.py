@@ -7,312 +7,280 @@ import datetime
 import csv
 import os
 
-class Scrapper:
-    max_cards = 999
-    file = None
+def tsv_update_shortcards_all():
+    for cat in CAT_URLS:
+        print(cat)
+        tsv_update_shortcards(cat)
 
-    def __init__(self):
-        pass
+def tsv_update_fullcards_all():
+    for cat in CAT_URLS:
+        print(cat)
+        tsv_update_fullcards(cat)
 
-    def __del__(self):
-        self.close_file()
-        pass
+def tsv_update_shortcards(cat):
+    fname = get_file(cat)
+    if os.path.isfile(fname):
+        file = open(fname, 'r')
+        re = csv.DictReader(file, delimiter=DELIM_CHAR)
+    else:
+        file = None
+        re = []
 
-    def run_shortcards(self, cat):
-        self.close_file()
-        cards = self.request_scards(cat)
-        urls_filt = self.read_urls_csv(self.get_file(cat))
-        cards = self.filter_cards_by_url(cards, urls_filt)
+    fname_tmp = get_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
 
-        for card in cards:
-            self.write_card_csv(card, cat)
+    wr.writeheader()
+    for card in re:
+        wr.writerow(card)
 
-        self.close_file()
-        self.run_remove_duplicates(cat)
-        return cards
+    cards = request_shortcards(cat)
+    urls_rm = tsv_read_urls(cat)
+    cards = remove_cards_by_url(cards, urls_rm)
+
+    for card in cards:
+        wr.writerow(card)
+
+    if file:
+        file.close()
+        os.remove(fname)
+    file_tmp.close()
+    os.rename(fname_tmp, fname)
+
+    tsv_remove_duplicates(cat)
+
+def tsv_update_fullcards(cat, cnt_max=999, force=False):
+    fname = get_file(cat)
+    if not os.path.isfile(fname):
+        tsv_update_shortcards(cat)
+    file = open(fname, 'r')
+    re = csv.DictReader(file, delimiter=DELIM_CHAR)
+
+    fname_tmp = get_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
     
-    def run_fullcards(self, cat):
-        fname = self.get_file(cat)
-        file = open(fname, 'r')
-        re = csv.DictReader(file, delimiter=DELIM_CHAR)
+    cnt = 0
+    wr.writeheader()
+    for row in re:
+        if (row['get_ok'] != 'True' or force) and cnt < cnt_max:
+            print(row['url'])
+            row = extend_card(row['url'], row)
+            cnt = cnt + 1
+        wr.writerow(row)
 
-        fname_tmp = self.get_tmp_file(cat)
-        file_tmp = open(fname_tmp, 'w')
-        wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
-        
-        cnt = 0
-        wr.writeheader()
-        for row in re:
-            if row['get_ok'] != 'True' and cnt < self.max_cards:
-                row = self.request_card_by_url(row['url'], row)
-                cnt = cnt + 1
-            wr.writerow(row)
+    file.close()
+    os.remove(fname)
+    file_tmp.close()
+    os.rename(fname_tmp, fname)
 
-        file.close()
-        file_tmp.close()
-        os.remove(fname)
-        os.rename(fname_tmp, fname)
+def tsv_remove_duplicates(cat):
+    fname = get_file(cat)
+    if not os.path.isfile(fname):
+        return []
+    file = open(fname, 'r')
+    re = csv.DictReader(file, delimiter=DELIM_CHAR)
 
-    def run_remove_duplicates(self, cat):
-        fname = self.get_file(cat)
-        file = open(fname, 'r')
-        re = csv.DictReader(file, delimiter=DELIM_CHAR)
+    fname_tmp = get_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
 
-        fname_tmp = self.get_tmp_file(cat)
-        file_tmp = open(fname_tmp, 'w')
-        wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
+    cards = list(re)
+    urls = [item['url'] for item in cards]
 
-        cards = list(re)
-        urls = [item['url'] for item in cards]
+    from collections import defaultdict
+    D = defaultdict(list)
+    for i,item in enumerate(urls):
+        D[item].append(i)
+    D = {k:v for k,v in D.items() if len(v)>1}
 
-        from collections import defaultdict
-        D = defaultdict(list)
-        for i,item in enumerate(urls):
-            D[item].append(i)
-        D = {k:v for k,v in D.items() if len(v)>1}
-
-        rmlist = []
-        for v in D.values():
-            while len(v) > 1:
-                rmlist.append(v[-1])
-                v.pop()
-        cards = [i for j, i in enumerate(cards) if j not in rmlist]
-        
-        wr.writeheader()
-        for card in cards:
-            wr.writerow(card)
-        
-        file.close()
-        file_tmp.close()
-        os.remove(fname)
-        os.rename(fname_tmp, fname)
-        return D
-
-    def run_clean_urls(self, cat):
-        fname = self.get_file(cat)
-        file = open(fname, 'r')
-        re = csv.DictReader(file, delimiter=DELIM_CHAR)
-
-        fname_tmp = self.get_tmp_file(cat)
-        file_tmp = open(fname_tmp, 'w')
-        wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
-        
-        wr.writeheader()
-        cards = list(re)
-        for card in cards:
-            card['url'] = card['url'].split('?')[0]
-            wr.writerow(card)
-        
-        file.close()
-        file_tmp.close()
-        os.remove(fname)
-        os.rename(fname_tmp, fname)
-
-    def filter_cards_by_url(self, cards, urls_filt):
-        urls = [item['url'] for item in cards]
-        urls = list(set(urls).difference(urls_filt))
-        cards = list(filter(lambda item: item['url'] in urls, cards))
-        return cards
-
-    def request_scards(self, cat):
-        cards = []
-        try:
-            req = requests.get(get_cat_url(cat), headers=REQ_HEADERS)
-            cards = self.parse_scards(req.text)
-        except Exception:
-            pass
-        return cards
-
-    def parse_scards(self, text):
-        cards = []
-        wraps = []
-        try:
-            bs = BeautifulSoup(text, 'html.parser')
-            wraps = bs.find_all(class_='product-card-wrapper')
-        except Exception:
-            pass
-        time = datetime.datetime.now().ctime()
-        for wrap in wraps:
-            card = self.init_card()
-            card['time'] = time
-            try:
-                card['url'] = URL_ROOT + wrap.find(class_='product-card__link').get('href').split('?')[0]
-                card['name'] = wrap.find(class_='product-card__title').text
-                card['price'] = wrap.find(class_='product-card__pricing').text
-                card['size'] = wrap.find(class_='product-card__size').text
-            except Exception:
-                pass
-            cards.append(card)
-        return cards
-
-    def request_card_by_url(self, url, card = None):
-        if card == None:
-            card = self.init_card()
-
-        card['url'] = url
-        card['get_ok'] = False
-        card['parse_ok'] = False
-        card['time_'] = datetime.datetime.now().ctime()
-
-        try:
-            r = requests.get(url)
-            card['get_ok'] = True
-        except Exception:
-            pass  
-
-        try:
-            bs = BeautifulSoup(r.text, 'html.parser')
-            card['parse_ok'] = True
-        except Exception:
-            pass
-        
-        try:
-            card['name_'] = bs.find(class_='product__title').text
-            card['price_'] = bs.find(class_='product-price-wrapper').find(class_='price-new').text
-        except Exception:
-            card['parse_ok'] = False
-            pass
-        
-        try: 
-            card['brand'] = bs.find(class_='product-brand__title').text
-        except Exception:
-            pass
-
-        try:
-            calories_value = bs.find_all(class_='product-calories-item__value')
-            calories_title = bs.find_all(class_='product-calories-item__title')
-            for i in range(len(calories_value)):
-                card[self.get_calories_key(calories_title[i].text)] = calories_value[i].text
-        except Exception:
-            pass
-
-        try: 
-            card['composition'] = bs.find(class_='product-composition-title').parent.find('p').text
-        except Exception:
-            pass
-        
-
-        print('' if card['get_ok'] and card['parse_ok'] else 'FAILED', url)
-        return card
-
-    def write_card_csv(self, card, cat):
-        file, isEmpty = self.open_file(cat)
-        wr = csv.DictWriter(file, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
-        #if isEmpty:
-        #    wr.writeheader()
+    rmlist = []
+    for v in D.values():
+        while len(v) > 1:
+            rmlist.append(v[-1])
+            v.pop()
+    cards = [i for j, i in enumerate(cards) if j not in rmlist]
+    
+    wr.writeheader()
+    for card in cards:
         wr.writerow(card)
     
-    def read_urls_csv(self, fname):
-        urls = []
-        if os.path.isfile(fname):
-            file = open(fname, 'r', newline='')
-            re = csv.DictReader(file, delimiter=DELIM_CHAR)
-            for row in re:
-                urls.append(row['url'].strip())
-            file.close()
+    file.close()
+    os.remove(fname)
+    file_tmp.close()
+    os.rename(fname_tmp, fname)
+    return D
+
+def tsv_clean_urls(cat):
+    fname = get_file(cat)
+    if not os.path.isfile(fname):
+        return
+    file = open(fname, 'r')
+    re = csv.DictReader(file, delimiter=DELIM_CHAR)
+
+    fname_tmp = get_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
+    
+    wr.writeheader()
+    cards = list(re)
+    for card in cards:
+        card['url'] = card['url'].split('?')[0]
+        wr.writerow(card)
+    
+    file.close()
+    os.remove(fname)
+    file_tmp.close()
+    os.rename(fname_tmp, fname)
+
+def tsv_read_urls(cat):
+    urls = []
+    fname = get_file(cat)
+    if not os.path.isfile(fname):
         return urls
+    if os.path.isfile(fname):
+        file = open(fname, 'r', newline='')
+        re = csv.DictReader(file, delimiter=DELIM_CHAR)
+        for row in re:
+            urls.append(row['url'].strip())
+        file.close()
+    return urls
 
-    def open_file(self, cat):
-        if self.file == None:
-            self.file = open(self.get_file(cat), 'a', newline='')
-        return self.file, self.file.tell() == 0
+def tsv_find_duplicates(cat):
+    fname = get_file(cat)
+    if not os.path.isfile(fname):
+        return []
+    file = open(fname, 'r')
+    re = csv.DictReader(file, delimiter=DELIM_CHAR)
+
+    fname_tmp = get_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
+
+    cards = list(re)
+    urls = [item['url'] for item in cards]
+
+    from collections import defaultdict
+    D = defaultdict(list)
+    for i,item in enumerate(urls):
+        D[item].append(i)
+    D = {k:v for k,v in D.items() if len(v)>1}
+    return D
+
+def remove_cards_by_url(cards, urls_rm):
+    urls = [item['url'] for item in cards]
+    urls = list(set(urls).difference(urls_rm))
+    cards = list(filter(lambda item: item['url'] in urls, cards))
+    return cards
+
+def request_shortcards(cat):
+    cards = []
+    try:
+        rsp = requests.get(get_cat_url(cat), headers=REQ_HEADERS)
+        cards = parse_shortcards(rsp.text)
+    except Exception:
+        pass
+    return cards
+
+def parse_shortcards(text):
+    cards = []
+    wraps = []
+    try:
+        bs = BeautifulSoup(text, 'html.parser')
+        wraps = bs.find_all(class_='product-card-wrapper')
+    except Exception:
+        pass
+    time = datetime.datetime.now().ctime()
+    for wrap in wraps:
+        card = get_empty_card()
+        card['time'] = time
+        try:
+            card['url'] = URL_ROOT + wrap.find(class_='product-card__link').get('href').split('?')[0]
+            card['name'] = wrap.find(class_='product-card__title').text
+            card['price'] = wrap.find(class_='product-card__pricing').text
+            card['size'] = wrap.find(class_='product-card__size').text
+        except Exception:
+            pass
+        cards.append(card)
+    return cards
+
+
+def extend_card(url, card):
+    if card == None:
+        card = get_empty_card()
     
-    def close_file(self):
-        if self.file != None:
-            self.file.close()
-            self.file = None
+    card['url'] = url
+    card['get_ok'] = False
+    card['parse_ok'] = False
+    card['time_'] = datetime.datetime.now().ctime()
 
-    def get_file(self, cat):
-        return os.path.join(self.get_folder(), cat + FILE_EXT)
+    text = None
+    try:
+        rsp = requests.get(url)
+        card['get_ok'] = True
+        text = rsp.text
+    except Exception:
+        print('err')
+        pass  
     
-    def get_tmp_file(self, cat):
-        return os.path.join(self.get_folder(), cat + '_tmp' + FILE_EXT)
+    if text:
+        card = parse_fullcard(text, card)
     
-    def get_folder(self):
-        dname = os.path.join(DATA_DIR, 'catalog')
-        if not os.path.isdir(dname):
-            os.makedirs(dname, mode=0o777)
-        return dname
+    return card
 
-    def get_calories_key(self, calories_title):
-        if calories_title.casefold().strip() == 'углеводы':
-            return 'carbos'
-        if calories_title.casefold().strip() == 'жиры':
-            return 'fats'
-        if calories_title.casefold().strip() == 'белки':
-            return 'proteins'
-        if calories_title.casefold().strip() == 'калории':
-            return 'calories'
-        return None
+def parse_fullcard(text, card = None):
+    if card == None:
+        card = get_empty_card()
 
-    def init_card(self):
-        card = dict.fromkeys(CARD_KEYS)
-        for key in CARD_KEYS:
-            card[key] = PLACEHOLDER
-        return card
+    try:
+        bs = BeautifulSoup(text, 'html.parser')
+        card['parse_ok'] = True
+    except Exception:
+        pass
+    
+    try:
+        card['name_'] = bs.find(class_='product__title').text
+        card['price_'] = bs.find(class_='product-price-wrapper').find(class_='price-new').text
+    except Exception:
+        card['parse_ok'] = False
+        pass
+    
+    try: 
+        card['brand'] = bs.find(class_='product-brand__title').text
+    except Exception:
+        pass
 
-def run_shortcards():
-    s = Scrapper()
-    for cat in CAT_URLS:
-        print(cat)
-        s.run_shortcards(cat)
+    try:
+        calories_value = bs.find_all(class_='product-calories-item__value')
+        calories_title = bs.find_all(class_='product-calories-item__title')
+        for i in range(len(calories_value)):
+            card[get_calories_key(calories_title[i].text)] = calories_value[i].text
+    except Exception:
+        pass
 
-def run_fullcards():
-    s = Scrapper()
-    s.max_cards = 999
-    for cat in CAT_URLS:
-        print(cat)
-        s.run_fullcards(cat)
+    try: 
+        card['composition'] = bs.find(class_='product-composition-title').parent.find('p').text
+    except Exception:
+        pass
 
-def run_clean_urls():
-    s = Scrapper()
-    for cat in CAT_URLS:
-        s.run_clean_urls(cat)
+    return card
 
-def run_remove_duplicates():
-    s = Scrapper()
-    for cat in CAT_URLS:
-        s.run_remove_duplicates(cat)
+def get_calories_key(calories_title):
+    if calories_title.casefold().strip() == 'углеводы':
+        return 'carbos'
+    if calories_title.casefold().strip() == 'жиры':
+        return 'fats'
+    if calories_title.casefold().strip() == 'белки':
+        return 'proteins'
+    if calories_title.casefold().strip() == 'калории':
+        return 'calories'
+    return None
 
-def run_localprice():
-    file = open(fname, 'w')
-    wr = csv.DictWriter(file, fieldnames=['time'] + DELIV_KEYS, delimiter=DELIM_CHAR)
-
-    for loc in DELIV_LOCS:
-        bro = get_local_browser(DELIV_LOCS[loc])
-        scr = Scrapper()
-        for cat in CAT_URLS:
-            print(loc, cat)
-            bro.get(get_cat_url(cat))
-            scards = scr.parse_scards(bro.page_source)
-            dname = os.path.join(DATA_DIR, cat)
-            if not os.path.isdir(dname):
-                os.makedirs(dname, mode=0o777)
-            for scard in scards:
-
-                alias = get_product_alias(scard['url'])
-
-
-
-                fname = os.path.join(dname, alias + '.tsv')
-                if not os.path.isfile(fname):
-                    file = open(fname, 'w')
-                    wr = csv.DictWriter(file, fieldnames=['time'] + DELIV_KEYS, delimiter=DELIM_CHAR)
-                    wr.writeheader()
-                    row = dict.fromkeys(['time'] + DELIV_KEYS)
-                    row['time'] = datetime.datetime.now().ctime()
-                    for k in DELIV_KEYS:
-                        row[k] = 'none'
-                    row[loc] = scard['price']
-                    wr.writerow(row)
-                    file.close()
-                else:
-                    file = open(fname, 'a')
-                    wr = csv.DictWriter(file, fieldnames=DELIV_KEYS, delimiter=DELIM_CHAR)
-                    re = csv.DictReader(file, fieldnames=DELIV_KEYS, delimiter=DELIM_CHAR)
-                    return re
-
-            return scards
+def get_empty_card():
+    card = dict.fromkeys(CARD_KEYS)
+    for key in CARD_KEYS:
+        card[key] = PLACEHOLDER
+    return card
 
 def get_local_browser(loc):
     from selenium import webdriver
@@ -381,6 +349,34 @@ def get_product_code(url):
     code = code[-1]
     return code
 
+def get_file(cat):
+    return os.path.join(get_folder(), cat + FILE_EXT)
+
+def get_tmp_file(cat):
+    return os.path.join(get_folder(), cat + '_tmp' + FILE_EXT)
+
+def get_folder():
+    dname = os.path.join(DATA_DIR, 'catalog')
+    if not os.path.isdir(dname):
+        os.makedirs(dname, mode=0o777)
+    return dname
+
+def get_calories_key(calories_title):
+    if calories_title.casefold().strip() == 'углеводы':
+        return 'carbos'
+    if calories_title.casefold().strip() == 'жиры':
+        return 'fats'
+    if calories_title.casefold().strip() == 'белки':
+        return 'proteins'
+    if calories_title.casefold().strip() == 'калории':
+        return 'calories'
+    return None
+
+def get_empty_card():
+    card = dict.fromkeys(CARD_KEYS)
+    for key in CARD_KEYS:
+        card[key] = PLACEHOLDER
+    return card
 
 REQ_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0',
