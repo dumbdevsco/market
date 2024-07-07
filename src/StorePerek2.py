@@ -7,21 +7,40 @@ import datetime
 import csv
 import os
 
-def tsv_update_shortcards_all():
+def all_update():
+    for loc in LOC_ADDRESS:
+        if not LOC_ADDRESS[loc]:
+            continue
+        all_update_prices_local(loc)
+    all_update_fullcards()
+
+def all_update_prices_local(loc):
+    bro = get_browser_local(loc)
+    for cat in CAT_URLS:
+        print(cat)
+        cards = tsv_update_prices_local(cat, loc, bro)
+        tsv_add_cards(cat, cards)
+
+def all_update_shortcards_local(loc):
+    bro = get_browser_local(loc)
+    for cat in CAT_URLS:
+        print(cat)
+        bro.get(get_cat_url(cat))
+        cards = parse_shortcards(bro.page_source)
+        tsv_add_cards(cat, cards)
+
+def all_update_shortcards():
     for cat in CAT_URLS:
         print(cat)
         tsv_update_shortcards(cat)
 
-def tsv_update_fullcards_all():
+def all_update_fullcards():
     for cat in CAT_URLS:
         print(cat)
         tsv_update_fullcards(cat)
 
-def tsv_update_shortcards(cat):
-    tsv_add_cards(cat, request_shortcards(cat))
-
-def tsv_add_cards(cat, cards):
-    fname = get_file(cat)
+def tsv_update_prices_local(cat, loc, bro = None):
+    fname = get_price_file(cat)
     if os.path.isfile(fname):
         file = open(fname, 'r')
         re = csv.DictReader(file, delimiter=DELIM_CHAR)
@@ -29,7 +48,84 @@ def tsv_add_cards(cat, cards):
         file = None
         re = []
 
-    fname_tmp = get_tmp_file(cat)
+    fname_tmp = get_price_tmp_file(cat)
+    file_tmp = open(fname_tmp, 'w')
+    wr = csv.DictWriter(file_tmp, fieldnames=PRICE_KEYS, delimiter=DELIM_CHAR)
+    
+    if not bro:
+        bro = get_browser_local(loc)
+    bro.get(get_cat_url(cat))
+    cards = parse_shortcards(bro.page_source)
+    cards = get_unique_cards(cards)
+
+    wr.writeheader()
+    for price in re:
+        if price['locale'] == loc:
+            continue
+        wr.writerow(price)
+    
+    for card in cards:
+        price = get_empty_price()
+        price['name'] = card['name']
+        price['url'] = card['url']
+        price['locale'] = loc
+        price['address'] = LOC_ADDRESS[loc]
+        price['price'] = card['price']
+        price['time'] = card['time']
+        wr.writerow(price)
+    
+    if file:
+        file.close()
+        os.remove(fname)
+    file_tmp.close()
+    os.rename(fname_tmp, fname)
+
+    return cards
+
+def tsv_set_column_price(col_name, col_val = 'none'):
+    for dname_it in os.listdir(os.path.join(DATA_DIR, 'price')):
+        dname = os.path.join(DATA_DIR, 'price', dname_it)
+        if not os.path.isdir(dname):
+            continue
+        for fname_it in os.listdir(dname):
+            if not fname_it.endswith('.tsv'):
+                continue
+            fname = os.path.join(dname, fname_it)
+            file = open(fname, 'r')
+            re = csv.DictReader(file, delimiter=DELIM_CHAR)
+            fname_tmp = fname + '#tmp'
+            file_tmp = open(fname_tmp, 'w')
+
+            if col_name in re.fieldnames:
+                fields = re.fieldnames
+            else:
+                fields = re.fieldnames + [col_name]
+
+            wr = csv.DictWriter(file_tmp, fieldnames=fields,  delimiter=DELIM_CHAR)
+            wr.writeheader()
+            for row in re:
+                row[col_name] = col_val
+                wr.writerow(row)
+            file.close()
+            os.remove(fname)
+            file_tmp.close()
+            os.rename(fname_tmp, fname)
+            print(fname)
+    return
+
+def tsv_update_shortcards(cat):
+    tsv_add_cards(cat, request_shortcards(cat))
+
+def tsv_add_cards(cat, cards):
+    fname = get_cat_file(cat)
+    if os.path.isfile(fname):
+        file = open(fname, 'r')
+        re = csv.DictReader(file, delimiter=DELIM_CHAR)
+    else:
+        file = None
+        re = []
+
+    fname_tmp = get_cat_tmp_file(cat)
     file_tmp = open(fname_tmp, 'w')
     wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
 
@@ -52,13 +148,13 @@ def tsv_add_cards(cat, cards):
     tsv_remove_duplicates(cat)
 
 def tsv_update_fullcards(cat, cnt_max=999, force=False):
-    fname = get_file(cat)
+    fname = get_cat_file(cat)
     if not os.path.isfile(fname):
         tsv_update_shortcards(cat)
     file = open(fname, 'r')
     re = csv.DictReader(file, delimiter=DELIM_CHAR)
 
-    fname_tmp = get_tmp_file(cat)
+    fname_tmp = get_cat_tmp_file(cat)
     file_tmp = open(fname_tmp, 'w')
     wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
     
@@ -77,31 +173,17 @@ def tsv_update_fullcards(cat, cnt_max=999, force=False):
     os.rename(fname_tmp, fname)
 
 def tsv_remove_duplicates(cat):
-    fname = get_file(cat)
+    fname = get_cat_file(cat)
     if not os.path.isfile(fname):
         return []
     file = open(fname, 'r')
     re = csv.DictReader(file, delimiter=DELIM_CHAR)
 
-    fname_tmp = get_tmp_file(cat)
+    fname_tmp = get_cat_tmp_file(cat)
     file_tmp = open(fname_tmp, 'w')
     wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
 
-    cards = list(re)
-    urls = [item['url'] for item in cards]
-
-    from collections import defaultdict
-    D = defaultdict(list)
-    for i,item in enumerate(urls):
-        D[item].append(i)
-    D = {k:v for k,v in D.items() if len(v)>1}
-
-    rmlist = []
-    for v in D.values():
-        while len(v) > 1:
-            rmlist.append(v[-1])
-            v.pop()
-    cards = [i for j, i in enumerate(cards) if j not in rmlist]
+    cards = get_unique_cards(list(re))
     
     wr.writeheader()
     for card in cards:
@@ -111,16 +193,15 @@ def tsv_remove_duplicates(cat):
     os.remove(fname)
     file_tmp.close()
     os.rename(fname_tmp, fname)
-    return D
 
 def tsv_clean_urls(cat):
-    fname = get_file(cat)
+    fname = get_cat_file(cat)
     if not os.path.isfile(fname):
         return
     file = open(fname, 'r')
     re = csv.DictReader(file, delimiter=DELIM_CHAR)
 
-    fname_tmp = get_tmp_file(cat)
+    fname_tmp = get_cat_tmp_file(cat)
     file_tmp = open(fname_tmp, 'w')
     wr = csv.DictWriter(file_tmp, fieldnames=CARD_KEYS, delimiter=DELIM_CHAR)
     
@@ -137,7 +218,7 @@ def tsv_clean_urls(cat):
 
 def tsv_read_urls(cat):
     urls = []
-    fname = get_file(cat)
+    fname = get_cat_file(cat)
     if not os.path.isfile(fname):
         return urls
     if os.path.isfile(fname):
@@ -149,21 +230,13 @@ def tsv_read_urls(cat):
     return urls
 
 def tsv_find_duplicates(cat):
-    fname = get_file(cat)
+    fname = get_cat_file(cat)
     if not os.path.isfile(fname):
         return []
     file = open(fname, 'r')
     re = csv.DictReader(file, delimiter=DELIM_CHAR)
 
-    cards = list(re)
-    urls = [item['url'] for item in cards]
-
-    from collections import defaultdict
-    D = defaultdict(list)
-    for i,item in enumerate(urls):
-        D[item].append(i)
-    D = {k:v for k,v in D.items() if len(v)>1}
-    return D
+    return get_duplicated_cards(list(re))
 
 def remove_cards_by_url(cards, urls_rm):
     urls = [item['url'] for item in cards]
@@ -263,6 +336,26 @@ def parse_fullcard(text, card = None):
 
     return card
 
+def get_duplicated_cards(cards):
+    urls = [item['url'] for item in cards]
+    from collections import defaultdict
+    D = defaultdict(list)
+    for i,item in enumerate(urls):
+        D[item].append(i)
+    D = {k:v for k,v in D.items() if len(v)>1}
+    return D
+
+
+def get_unique_cards(cards):
+    D = get_duplicated_cards(cards)
+    rmlist = []
+    for v in D.values():
+        while len(v) > 1:
+            rmlist.append(v[-1])
+            v.pop()
+    cards = [i for j, i in enumerate(cards) if j not in rmlist]
+    return cards
+
 def get_calories_key(calories_title):
     if calories_title.casefold().strip() == 'углеводы':
         return 'carbos'
@@ -295,14 +388,27 @@ def get_product_code(url):
     code = code[-1]
     return code
 
-def get_file(cat):
-    return os.path.join(get_folder(), cat + FILE_EXT)
+def get_cat_file(cat):
+    return os.path.join(get_cat_folder(), cat + FILE_EXT)
 
-def get_tmp_file(cat):
-    return os.path.join(get_folder(), cat + '_tmp' + FILE_EXT)
+def get_cat_tmp_file(cat):
+    return os.path.join(get_cat_folder(), cat + '_tmp' + FILE_EXT)
 
-def get_folder():
+def get_cat_folder():
     dname = os.path.join(DATA_DIR, 'catalog')
+    if not os.path.isdir(dname):
+        os.makedirs(dname, mode=0o777)
+    return dname
+
+def get_price_file(cat):
+    return os.path.join(get_price_folder(), cat + FILE_EXT)
+
+def get_price_tmp_file(cat):
+    return os.path.join(get_price_folder(), cat + '_tmp' + FILE_EXT)
+
+def get_price_folder():
+    datestr = datetime.datetime.now().strftime("%Y-%m-%d")
+    dname = os.path.join(DATA_DIR, 'price', datestr)
     if not os.path.isdir(dname):
         os.makedirs(dname, mode=0o777)
     return dname
@@ -323,6 +429,12 @@ def get_empty_card():
     for key in CARD_KEYS:
         card[key] = PLACEHOLDER
     return card
+
+def get_empty_price():
+    price = dict.fromkeys(PRICE_KEYS)
+    for key in PRICE_KEYS:
+        price[key] = PLACEHOLDER
+    return price
 
 def get_browser_local(loc):
     from selenium import webdriver
@@ -352,8 +464,8 @@ def get_browser_local(loc):
 
     e = browser.find_element(By.ID, 'react-select-2-input')
     e.clear()
-    if loc in DELIV_LOCS:
-        e.send_keys(DELIV_LOCS[loc])
+    if loc in LOC_ADDRESS:
+        e.send_keys(LOC_ADDRESS[loc])
     else:
         e.send_keys(loc)
 
@@ -379,15 +491,6 @@ def get_browser_local(loc):
 
     return browser
 
-def request_shortcards_local(cat, loc):
-    bro = get_browser_local(loc)
-    cards = []
-    try:
-        rsp = requests.get(get_cat_url(cat), headers=REQ_HEADERS)
-        cards = parse_shortcards(rsp.text)
-    except Exception:
-        pass
-    return cards
 
 REQ_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:127.0) Gecko/20100101 Firefox/127.0',
@@ -408,11 +511,17 @@ URL_ROOT = 'https://www.perekrestok.ru'
 
 CARD_KEYS = ['name', 'price', 'size', 'url', 'time', 'name_', 'price_', 'brand', 'calories', 'proteins', 'fats', 'carbos', 'composition', 'get_ok', 'parse_ok', 'time_']
 
-DELIV_KEYS = ['msk', 'spb', 'ekb', 'nn', 'nsk', 'pg', 'rnd']
+PRICE_KEYS = ['name', 'url', 'locale', 'address', 'price', 'time']
 
-DELIV_LOCS = {
+LOC_ADDRESS = {
     'msk': 'Москва, Большой Патриарший переулок, 5',
     'spb': 'Санкт-Петербург, Биржевая площадь, 4',
+    'vl': None,
+    'ekb': 'Екатеринбург, ул. Бориса Ельцина, 3',
+    'nn': 'Нижний Новгород, площадь Минина и Пожарского, 2',
+    'nsk': None,
+    'pg': 'Пятигорск, улица Малыгина, 5',
+    'rnd': 'Ростов-на-Дону, Будённовский проспект, 45',
 }
 
 CAT_URLS = {
